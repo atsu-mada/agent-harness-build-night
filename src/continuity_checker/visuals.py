@@ -127,3 +127,171 @@ def graph_panel(export: dict, shot, findings) -> str:
             prev_right = x + sw
     p.append("</svg>")
     return "".join(p)
+
+
+# ---------- 16:9 graph card (fixed colors so it exports to PNG as seen) ----------
+
+CARD_W, CARD_H = 1600, 900
+C = {
+    "bg": "#0B0F19", "panel": "#111827", "line": "#334155", "text": "#F8FAFC",
+    "muted": "#94A3B8", "矛盾": "#F43F5E", "OK": "#22C55E", "不明": "#94A3B8",
+    "accent": "#38BDF8", "toward": "#C084FC",
+}
+CFONT = "font-family:'Hiragino Sans','Noto Sans JP','Open Sans',sans-serif"
+JACKETS = {"赤": "#F43F5E", "青": "#3B82F6"}
+
+
+def _ct(x, y, s, size=20, fill=None, weight=400, anchor="middle"):
+    return (f"<text x='{x:.0f}' y='{y:.0f}' font-size='{size}' fill='{fill or C['text']}' "
+            f"font-weight='{weight}' text-anchor='{anchor}' style=\"{CFONT}\">{escape(str(s))}</text>")
+
+
+def _fit(s, width, size):
+    """Cut a string to the characters that fit (Japanese glyphs are about 1 em)."""
+    s = str(s or "")
+    n = max(1, int(width / size))
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _pill(x, y, w, h, fill, stroke=None, sw=0):
+    st = f" stroke='{stroke}' stroke-width='{sw}'" if stroke else ""
+    return f"<rect x='{x:.0f}' y='{y:.0f}' width='{w:.0f}' height='{h:.0f}' rx='{h / 2:.0f}' fill='{fill}'{st}/>"
+
+
+def _figure(cx, cy, ent, fs, r=74):
+    color = C[_worst([f.status for f in fs])]
+    out = [f"<circle cx='{cx:.0f}' cy='{cy:.0f}' r='{r}' fill='{C['bg']}' stroke='{color}' stroke-width='7'/>"]
+    if ent in CHARACTERS:
+        jacket = next((f.claim.value for f in fs if f.claim.attr == "上着"), None)
+        body = JACKETS.get(jacket, C["panel"])
+        out.append(f"<circle cx='{cx:.0f}' cy='{cy - 26:.0f}' r='18' fill='none' stroke='{C['text']}' stroke-width='3'/>")
+        out.append(f"<path d='M{cx - 32:.0f} {cy + 44:.0f} Q{cx:.0f} {cy - 18:.0f} {cx + 32:.0f} {cy + 44:.0f} Z' "
+                   f"fill='{body}' stroke='{C['text']}' stroke-width='3'/>")
+    else:
+        out.append(_ct(cx, cy + 20, ICONS.get(ent, "◆"), 56))
+    out.append(_ct(cx, cy + r + 34, ent, 26, weight=800))
+    return out
+
+
+def graph_card(export: dict, shot, text, base, graph) -> str:
+    """One 1600x900 card: shot text, figures ringed by the graph result, the
+    no-memory vs graph verdict per claim, and the State chains that decided."""
+    p = [f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {CARD_W} {CARD_H}' width='{CARD_W}' "
+         f"height='{CARD_H}' role='img' aria-label='判定に使ったグラフ'>",
+         f"<rect width='{CARD_W}' height='{CARD_H}' fill='{C['bg']}'/>",
+         "<defs><marker id='cc-ar' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='8' markerHeight='8' "
+         f"orient='auto'><path d='M0 0L10 5L0 10z' fill='{C['muted']}'/></marker></defs>"]
+    if not graph:
+        p.append(_ct(CARD_W / 2, CARD_H / 2, "チェックすると、判定に使ったグラフがここに出ます", 32, C["muted"]))
+        p.append("</svg>")
+        return "".join(p)
+
+    # Header: shot and verdict counts.
+    counts = {s: sum(f.status == s for f in graph) for s in ("矛盾", "OK", "不明")}
+    p.append(_pill(48, 40, 104, 56, C["accent"]))
+    p.append(_ct(100, 79, f"S{int(shot)}", 30, C["bg"], 800))
+    p.append(_ct(176, 80, _fit(text, 900, 34), 34, weight=700, anchor="start"))
+    bx = CARD_W - 48
+    for s in ("不明", "OK", "矛盾"):
+        if counts[s]:
+            w = 150
+            bx -= w
+            p.append(_pill(bx, 44, w - 12, 48, C["bg"], C[s], 3))
+            p.append(_ct(bx + (w - 12) / 2, 77, f"{s} {counts[s]}", 24, C[s], 800))
+
+    # Left: the shot picture and the comparison per claim.
+    p.append(f"<rect x='48' y='128' width='520' height='690' rx='28' fill='{C['panel']}'/>")
+    p.append(_ct(76, 172, "ショットの絵", 22, C["muted"], 700, "start"))
+    by_ent: dict[str, list] = {}
+    for f in graph:
+        by_ent.setdefault(f.claim.entity, []).append(f)
+    ents = list(by_ent.items())[:3]
+    for i, (ent, fs) in enumerate(ents):
+        cx = 48 + 520 * (i + 0.5) / len(ents)
+        p += _figure(cx, 300, ent, fs, r=74 if len(ents) < 3 else 62)
+    p.append(_ct(76, 478, "記憶なし　→　グラフ", 22, C["muted"], 700, "start"))
+    base_by = {(f.claim.entity, f.claim.attr, f.claim.value): f.status for f in base}
+    for j, f in enumerate(graph[:5]):
+        y = 528 + 60 * j
+        c = f.claim
+        who = f"{c.entity}→{c.toward}" if getattr(c, "toward", None) else c.entity
+        p.append(_ct(76, y, _fit(f"{who}の{c.attr}「{c.value}」", 250, 22), 22, weight=600, anchor="start"))
+        b = base_by.get((c.entity, c.attr, c.value), "不明")
+        p.append(_pill(340, y - 30, 92, 40, C["bg"], C[b], 2))
+        p.append(_ct(386, y - 3, b, 20, C[b], 700))
+        p.append(_ct(452, y - 3, "→", 22, C["muted"]))
+        p.append(_pill(474, y - 30, 80, 40, C[f.status]))
+        p.append(_ct(514, y - 3, f.status, 20, C["bg"], 800))
+
+    # Right: the subgraph that decided each claim.
+    gx, gw = 600, CARD_W - 48 - 600
+    p.append(f"<rect x='{gx}' y='128' width='{gw}' height='690' rx='28' fill='{C['panel']}'/>")
+    p.append(_ct(gx + 28, 172, "判定に使ったグラフ（Entity → HAS → State → REPLACED_BY）", 22, C["muted"], 700, "start"))
+    states = export.get("states", [])
+    repl = {(r["src"].get("State"), r["dst"].get("State")): r.get("props", {})
+            for r in export.get("rels", []) if r.get("type") == "REPLACED_BY"}
+    rows, seen = [], set()
+    for f in graph:
+        c = f.claim
+        key = (c.entity, c.attr, getattr(c, "toward", None))
+        if key not in seen:
+            seen.add(key)
+            chain = sorted((s for s in states if (s["who"], s["attr"], s.get("toward")) == key),
+                           key=lambda s: s["from"])
+            rows.append((key, chain[-3:], f.status, c.value))
+    rows = rows[:3]
+    top, avail = 200, 600
+    rh = min(230, avail / len(rows))
+    ew = 150
+    for i, ((ent, attr, toward), chain, status, claimed) in enumerate(rows):
+        y = top + rh * i
+        mid = y + rh / 2 - 24
+        p.append(_pill(gx + 28, mid - 28, ew, 56, C["text"]))
+        p.append(_ct(gx + 28 + ew / 2, mid + 9, ent, 26, C["bg"], 800))
+        if not chain:
+            p.append(_ct(gx + 28 + ew + 40, mid + 9, f"{attr}：記録なし → 不明（推測で埋めない）", 24,
+                         C["不明"], 700, "start"))
+            continue
+        x0 = gx + 28 + ew + 70
+        gap = 120
+        k = len(chain)
+        bw = min(300, (gx + gw - 28 - x0 - gap * (k - 1)) / k)
+        bh = min(150, rh - 40)
+        prev_right = None
+        for j, s in enumerate(chain):
+            x = x0 + j * (bw + gap)
+            valid = s["from"] <= int(shot) <= s["to"]
+            stroke = C[status] if valid else C["line"]
+            to = "END" if s["to"] >= 99 else f"S{s['to']}"
+            p.append(f"<rect x='{x:.0f}' y='{mid - bh / 2:.0f}' width='{bw:.0f}' height='{bh:.0f}' rx='18' "
+                     f"fill='{C['bg']}' stroke='{stroke}' stroke-width='{6 if valid else 2}'/>")
+            ty = mid - bh / 2
+            p.append(_ct(x + bw / 2, ty + 40, _fit(f"{attr}：{s['value']}", bw - 20, 26), 26,
+                         C[status] if valid else C["text"], 800))
+            p.append(_ct(x + bw / 2, ty + 72, f"S{s['from']} – {to}", 20, C["accent"], 700))
+            p.append(_ct(x + bw / 2, ty + 102, _fit(s.get("cause"), bw - 24, 18), 18, C["muted"]))
+            if s.get("toward") and bh > 120:
+                p.append(_ct(x + bw / 2, ty + 130, f"TOWARD → {s['toward']}", 18, C["toward"], 700))
+            if j == 0:
+                p.append(f"<line x1='{gx + 28 + ew:.0f}' y1='{mid:.0f}' x2='{x - 4:.0f}' y2='{mid:.0f}' "
+                         f"stroke='{C['muted']}' stroke-width='3' marker-end='url(#cc-ar)'/>")
+                p.append(_ct((gx + 28 + ew + x) / 2, mid - 12, "HAS", 16, C["muted"], 700))
+            else:
+                props = repl.get((chain[j - 1]["id"], s["id"]), {})
+                p.append(f"<line x1='{prev_right:.0f}' y1='{mid:.0f}' x2='{x - 4:.0f}' y2='{mid:.0f}' "
+                         f"stroke='{C['muted']}' stroke-width='3' marker-end='url(#cc-ar)'/>")
+                p.append(_ct((prev_right + x) / 2, mid - 12, "REPLACED_BY", 14, C["muted"], 700))
+            if valid:
+                p.append(_ct(x + bw / 2, mid + bh / 2 + 30, f"S{int(shot)} の判定：「{claimed}」→ {status}",
+                             20, C[status], 800))
+            prev_right = x + bw
+
+    # Footer legend.
+    lx = 48
+    for s, label in (("矛盾", "赤＝記録と矛盾"), ("OK", "緑＝記録どおり"), ("不明", "灰＝記録なし")):
+        p.append(f"<circle cx='{lx + 12}' cy='{CARD_H - 42}' r='10' fill='{C[s]}'/>")
+        p.append(_ct(lx + 32, CARD_H - 34, label, 20, C["muted"], 600, "start"))
+        lx += 230
+    p.append(_ct(CARD_W - 48, CARD_H - 34, "Continuity Checker · Relate graph → Neo4j", 20, C["muted"], 600, "end"))
+    p.append("</svg>")
+    return "".join(p)
