@@ -153,6 +153,9 @@ def guard(db, shot: int, text: str, change: dict) -> tuple[bool, str]:
         return False, f"ガード④：S{shot - 1}の記録がない（{label}）"
     if rec["value"] != frm:
         return False, f"ガード④：S{shot - 1}の記録は「{rec['value']}」で「{frm}」ではない"
+    now = world.expected(db, ent, attr, shot, toward=toward)
+    if now is not None and now["value"] == to and now["since"] == shot:
+        return False, f"ガード④：S{shot}から「{to}」はすでに記録済み"
     return True, "ガード通過"
 
 

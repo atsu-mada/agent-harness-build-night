@@ -103,6 +103,10 @@ class CheckerTests(StubWorld):
                ("カイ", "上着", "なし", 5, END, "青い上着を脱ぐ", None)]
         _rows, score, _b, _o = checker.evaluate(db)
         self.assertEqual(score["graph"], [10, 0])
+        ok, reason = propose.guard(db, 5, "カイが青い上着を脱ぐ。", {
+            "entity": "カイ", "attr": "上着", "from": "青", "to": "なし", "cause_quote": "青い上着を脱ぐ"})
+        self.assertFalse(ok)
+        self.assertIn("記録済み", reason)
 
 
 class GuardTests(StubWorld):
