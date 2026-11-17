@@ -51,3 +51,10 @@ Use the token it prints to sign in. Not tested yet.
 - Replace `extract()` with an LLM extractor (`claude -p` or ai& credits) that returns the same tuples; keep the red decision in the graph query.
 - Add a shot that is an intended flashback to `world.ALLOWED` and show it stays green.
 - Add "teleport" checks: a character's place changes without a move event.
+
+## Environment (Mac mini, 2026-11-17)
+
+- `uv sync` creates `.venv` from `pyproject.toml` (relate-db, gradio). Run scripts with `uv run python src/continuity_checker/<file>.py`.
+- LLM calls go through `src/continuity_checker/llm.py` (`claude -p` with structured JSON output and a minimal context; about 3 s per call). Test: `uv run python src/continuity_checker/llm.py`.
+- The demo is recorded on the Mac mini. Its local Neo4j (Homebrew service, Browser at http://localhost:7474) already holds other graphs that use labels such as `Character` and `Shot`. Copies of tonight's graph use the `CC_` label prefix only (`CC_Entity`, `CC_State`, `CC_Shot`), and clean-up deletes only `CC_` nodes.
+- The Relate CLI (`relate serve`) is not installed, and ports 7474/7687 are taken by that Neo4j.
