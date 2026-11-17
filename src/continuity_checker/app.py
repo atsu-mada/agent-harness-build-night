@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import gradio as gr
 
 import checker
+import visuals
 import world
 
 try:
@@ -125,8 +126,7 @@ def run(shot, text, reds):
     if any(f.status == "矛盾" for f in graph):
         reds = [r for r in reds if r != [shot, text]] + [[shot, text]]
     props, msg = get_proposals(shot, text)
-    return (to_highlight(text, base), notes(base), to_highlight(text, graph), notes(graph),
-            props, msg, reds)
+    return (*render_check(shot, text, base, graph), props, msg, reds)
 
 
 # ---------- approve / reject ----------
@@ -163,7 +163,19 @@ def reject(i, props):
 
 def recheck(shot, text):
     base, graph = check_pair(int(shot), text)
-    return to_highlight(text, base), notes(base), to_highlight(text, graph), notes(graph)
+    return render_check(int(shot), text, base, graph)
+
+
+def render_check(shot, text, base, graph):
+    """Text highlights and notes for both sides, plus the shot card and graph SVGs."""
+    try:
+        export = world.export(db()) if hasattr(world, "export") else {}
+        card = visuals.shot_card(shot, text, graph)
+        panel = visuals.graph_panel(export, shot, graph)
+    except Exception as e:  # noqa: BLE001 - never break the check
+        card, panel = "", f"図を描けませんでした（{type(e).__name__}）"
+    return (to_highlight(text, base), notes(base), to_highlight(text, graph), notes(graph),
+            card, panel)
 
 
 def label(p):
@@ -176,7 +188,7 @@ def label(p):
 @on_db_thread
 def do_reset():
     DB["db"] = _reset_db()
-    return f"デモ記録に戻しました。{sync_mirror()}", [], [], ""
+    return f"デモ記録に戻しました。{sync_mirror()}", [], [], "", EMPTY_CARD, EMPTY_PANEL
 
 
 @on_db_thread
@@ -202,6 +214,38 @@ def before_generation(shot):
 
 # ---------- page ----------
 
+EMPTY_CARD = visuals.shot_card(0, "", [])
+EMPTY_PANEL = visuals.graph_panel({}, 0, [])
+
+# Default design system 'codex': black on white, Open Sans, pill controls,
+# no shadows or gradients. Dark mode inverts black and white.
+THEME = gr.themes.Base(
+    primary_hue=gr.themes.colors.neutral,
+    neutral_hue=gr.themes.colors.neutral,
+    font=[gr.themes.GoogleFont("Open Sans"), "sans-serif"],
+    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "monospace"],
+    radius_size=gr.themes.sizes.radius_lg,
+).set(
+    body_background_fill="#ffffff", body_background_fill_dark="#0a0a0a",
+    body_text_color="#111827", body_text_color_dark="#f5f5f5",
+    block_background_fill="#ffffff", block_background_fill_dark="#0a0a0a",
+    block_border_color="#e5e5e5", block_border_color_dark="#262626",
+    block_shadow="none", block_shadow_dark="none",
+    button_primary_background_fill="#000000", button_primary_background_fill_dark="#ffffff",
+    button_primary_background_fill_hover="#262626", button_primary_background_fill_hover_dark="#e5e5e5",
+    button_primary_text_color="#ffffff", button_primary_text_color_dark="#000000",
+    button_secondary_background_fill="#ffffff", button_secondary_background_fill_dark="#0a0a0a",
+    button_secondary_border_color="#000000", button_secondary_border_color_dark="#ffffff",
+    button_secondary_text_color="#000000", button_secondary_text_color_dark="#ffffff",
+)
+CSS = """
+* { box-shadow: none !important; background-image: none !important; }
+button { border-radius: 9999px !important; font-weight: 600 !important; }
+h2 { font-weight: 800 !important; letter-spacing: -0.02em; }
+h3 { font-weight: 700 !important; }
+.visual svg { display: block; max-width: 100%; height: auto; }
+"""
+
 with gr.Blocks(title="Continuity Checker") as demo:
     gr.Markdown("## ショットのつながりチェッカー（Relate / Neo4j）")
     props_state = gr.State([])
@@ -223,10 +267,17 @@ with gr.Blocks(title="Continuity Checker") as demo:
             gr.Markdown("### ハーネス（グラフの記録を参照）")
             graph_hl = gr.HighlightedText(color_map=COLORS, show_legend=True)
             graph_md = gr.Markdown()
+    with gr.Row(equal_height=False):
+        with gr.Column(scale=2):
+            gr.Markdown("### ショットの絵（グラフの判定で色分け：赤＝矛盾・緑＝OK・灰＝不明）")
+            card_html = gr.HTML(EMPTY_CARD, elem_classes="visual")
+        with gr.Column(scale=3):
+            gr.Markdown("### 判定に使ったグラフ（Entity → HAS → State → REPLACED_BY）")
+            panel_html = gr.HTML(EMPTY_PANEL, elem_classes="visual")
 
     gr.Markdown("### 変化の提案（LLM → ガード → 人が承認）")
     prop_msg = gr.Markdown()
-    check_outputs = [base_hl, base_md, graph_hl, graph_md]
+    check_outputs = [base_hl, base_md, graph_hl, graph_md, card_html, panel_html]
 
     @gr.render(inputs=props_state)
     def cards(props):
@@ -250,7 +301,7 @@ with gr.Blocks(title="Continuity Checker") as demo:
                 ng_btn.click(lambda ps, i=i: reject(i, ps), [props_state], [props_state, status_md])
 
     btn.click(run, [shot, text, reds_state], [*check_outputs, props_state, prop_msg, reds_state])
-    reset_btn.click(do_reset, None, [status_md, props_state, reds_state, prop_msg])
+    reset_btn.click(do_reset, None, [status_md, props_state, reds_state, prop_msg, card_html, panel_html])
 
     gr.Markdown("---")
     gr.Markdown("### 生成の前の欄（このショットで有効な記録＝プロンプトに渡す文脈）")
@@ -268,4 +319,4 @@ with gr.Blocks(title="Continuity Checker") as demo:
     eval_btn.click(run_eval, None, [eval_md, eval_df])
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(theme=THEME, css=CSS)
