@@ -11,7 +11,8 @@ from dataclasses import dataclass
 
 import world
 
-# (phrase in the shot text, entity, attr, value)
+# (phrase in the shot text, entity, attr, value[, toward])
+# A 5th item names the other character of a relationship state (TOWARD).
 LEXICON = [
     ("剣を右手", "剣", "持ち手", "右手"),
     ("右手の剣", "剣", "持ち手", "右手"),
@@ -52,6 +53,9 @@ LEXICON = [
     ("ポニーテール", "ミナ", "髪型", "ポニーテール"),
     ("髪を下ろしたミナ", "ミナ", "髪型", "下ろし髪"),
     ("ミナが左手で書く", "ミナ", "利き手", "左"),
+    # relationship states (who, attr, value, toward)
+    ("カイを警戒", "ミナ", "信頼", "警戒", "カイ"),
+    ("カイを信じる", "ミナ", "信頼", "信頼", "カイ"),
 ]
 
 
@@ -62,6 +66,7 @@ class Claim:
     value: str
     start: int
     end: int
+    toward: str | None = None
 
 
 @dataclass
@@ -73,13 +78,15 @@ class Finding:
 
 def extract(text: str) -> list[Claim]:
     claims, taken = [], set()
-    for phrase, ent, attr, value in sorted(LEXICON, key=lambda r: -len(r[0])):
+    for row in sorted(LEXICON, key=lambda r: -len(r[0])):
+        phrase, ent, attr, value = row[:4]
+        toward = row[4] if len(row) > 4 else None
         start = text.find(phrase)
         while start != -1:
             span = set(range(start, start + len(phrase)))
             if not span & taken:
                 taken |= span
-                claims.append(Claim(ent, attr, value, start, start + len(phrase)))
+                claims.append(Claim(ent, attr, value, start, start + len(phrase), toward))
             start = text.find(phrase, start + 1)
     return sorted(claims, key=lambda c: c.start)
 
@@ -90,7 +97,7 @@ def check_with_graph(db, shot: int, text: str) -> list[Finding]:
         return [Finding(c, "OK", f"意図的な不連続（{world.ALLOWED[shot]}）") for c in extract(text)]
     out = []
     for c in extract(text):
-        rec = world.expected(db, c.entity, c.attr, shot)
+        rec = world.expected(db, c.entity, c.attr, shot, toward=c.toward)
         if rec is None:
             out.append(Finding(c, "不明", "記録なし（推測で埋めない）"))
         elif rec["value"] == c.value:
@@ -102,10 +109,10 @@ def check_with_graph(db, shot: int, text: str) -> list[Finding]:
 
 def check_without_memory(shot: int, text: str) -> list[Finding]:
     """Baseline: sees only the previous shot's text, knows no events."""
-    prev = {(c.entity, c.attr): c.value for c in extract(world.SHOTS.get(shot - 1, ""))}
+    prev = {(c.entity, c.attr, c.toward): c.value for c in extract(world.SHOTS.get(shot - 1, ""))}
     out = []
     for c in extract(text):
-        before = prev.get((c.entity, c.attr))
+        before = prev.get((c.entity, c.attr, c.toward))
         if before is None:
             out.append(Finding(c, "不明", "直前のショットに記述なし"))
         elif before == c.value:
@@ -127,6 +134,14 @@ CASES = [
     (6, "上着なしのカイが割れたグラスを見下ろす。", False),
     (5, "ミナが鍵をポケットにしまう。", False),
     (4, "半分残ったコーヒーの横で、眼鏡のカイが顔をしかめる。", False),
+    # extra cases in the current world (plan step 2)
+    (7, "眼鏡を外したカイがノートを読む。", True),
+    (7, "無傷のグラスが机に置かれている。", True),
+    (5, "足を引きずるカイが窓を見る。", False),
+    (7, "ミナが鍵をドアに差し込む。", False),
+    # relationship cases (ミナ→カイ 信頼 since S4)
+    (7, "ミナがカイを警戒して距離をとる。", True),
+    (5, "カイを信じるミナが鍵を握る。", False),
 ]
 
 

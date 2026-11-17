@@ -1,0 +1,13 @@
+[project]
+name = "agent-harness-build-night"
+version = "0.1.0"
+description = "Shot-list continuity checker built at Agent Harness Build Night (Neo4j), 2026-11-17."
+requires-python = ">=3.12"
+dependencies = [
+    "relate-db",
+    "gradio",
+    "neo4j>=6.4.1",
+]
+
+[tool.uv]
+package = false
