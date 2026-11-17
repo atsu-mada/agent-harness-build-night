@@ -1,0 +1,20 @@
+# Generated output and runtime logs stay local.
+data/*
+!data/.gitkeep
+!data/logs/
+data/logs/*
+!data/logs/.gitkeep
+
+node_modules/
+__pycache__/
+*.py[cod]
+.env
+config/*.local.json
+
+# OS/editor output.
+.DS_Store
+.vscode/
+
+# Relate graph store.
+*.rl
+.venv/
