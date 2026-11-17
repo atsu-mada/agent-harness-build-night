@@ -1,0 +1,10 @@
+mina_red_v01.prompt.txt	mina_red_v01.png
+kai_blue_v01.prompt.txt	kai_blue_v01.png
+kai_none_v01.prompt.txt	kai_none_v01.png	kai_blue_v01.png
+sword_v01.prompt.txt	sword_v01.png	mina_red_v01.png	kai_blue_v01.png
+key_v01.prompt.txt	key_v01.png	mina_red_v01.png	kai_blue_v01.png
+glass_ok_v01.prompt.txt	glass_ok_v01.png	mina_red_v01.png	kai_blue_v01.png
+glass_broken_v01.prompt.txt	glass_broken_v01.png	mina_red_v01.png	kai_blue_v01.png
+coffee_v01.prompt.txt	coffee_v01.png	mina_red_v01.png	kai_blue_v01.png
+laptop_v01.prompt.txt	laptop_v01.png	mina_red_v01.png	kai_blue_v01.png
+door_v01.prompt.txt	door_v01.png	mina_red_v01.png	kai_blue_v01.png

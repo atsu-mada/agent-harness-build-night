@@ -5,7 +5,9 @@ themes both work; status colors are fixed tokens.
 """
 from __future__ import annotations
 
+import base64
 from html import escape
+from pathlib import Path
 
 STATUS = {"矛盾": "#DC2626", "OK": "#16A34A", "不明": "#9CA3AF"}
 FG = "var(--body-text-color, #111827)"
@@ -158,10 +160,40 @@ def _pill(x, y, w, h, fill, stroke=None, sw=0):
     return f"<rect x='{x:.0f}' y='{y:.0f}' width='{w:.0f}' height='{h:.0f}' rx='{h / 2:.0f}' fill='{fill}'{st}/>"
 
 
+ASSETS = Path(__file__).resolve().parent / "assets"
+_ART_CACHE: dict[str, str | None] = {}
+
+
+def _art_key(ent, fs):
+    """Which anime-style picture shows this entity as the shot describes it."""
+    vals = {f.claim.attr: f.claim.value for f in fs}
+    if ent == "カイ":
+        return "kai_none" if vals.get("上着") == "なし" else "kai_blue"
+    if ent == "グラス":
+        return "glass_broken" if vals.get("状態") == "割れた" else "glass_ok"
+    return {"ミナ": "mina_red", "剣": "sword", "鍵": "key", "コーヒー": "coffee",
+            "ノートPC": "laptop", "部室": "door"}.get(ent)
+
+
+def _art(key):
+    """The picture as a data URI (embedded, so the PNG export keeps it), or None."""
+    if key not in _ART_CACHE:
+        path = ASSETS / f"{key}.jpg" if key else None
+        _ART_CACHE[key] = ("data:image/jpeg;base64," + base64.b64encode(path.read_bytes()).decode()
+                           if path and path.exists() else None)
+    return _ART_CACHE[key]
+
+
 def _figure(cx, cy, ent, fs, r=74):
     color = C[_worst([f.status for f in fs])]
-    out = [f"<circle cx='{cx:.0f}' cy='{cy:.0f}' r='{r}' fill='{C['bg']}' stroke='{color}' stroke-width='7'/>"]
-    if ent in CHARACTERS:
+    out = [f"<circle cx='{cx:.0f}' cy='{cy:.0f}' r='{r}' fill='{C['bg']}'/>"]
+    art = _art(_art_key(ent, fs))
+    if art:
+        cid = f"cc-clip-{abs(hash((ent, cx))) % 10**8}"
+        out.append(f"<clipPath id='{cid}'><circle cx='{cx:.0f}' cy='{cy:.0f}' r='{r - 3}'/></clipPath>")
+        out.append(f"<image href='{art}' x='{cx - r:.0f}' y='{cy - r:.0f}' width='{2 * r}' height='{2 * r}' "
+                   f"clip-path='url(#{cid})' preserveAspectRatio='xMidYMid slice'/>")
+    elif ent in CHARACTERS:
         jacket = next((f.claim.value for f in fs if f.claim.attr == "上着"), None)
         body = JACKETS.get(jacket, C["panel"])
         out.append(f"<circle cx='{cx:.0f}' cy='{cy - 26:.0f}' r='18' fill='none' stroke='{C['text']}' stroke-width='3'/>")
@@ -169,7 +201,8 @@ def _figure(cx, cy, ent, fs, r=74):
                    f"fill='{body}' stroke='{C['text']}' stroke-width='3'/>")
     else:
         out.append(_ct(cx, cy + 20, ICONS.get(ent, "◆"), 56))
-    out.append(_ct(cx, cy + r + 34, ent, 26, weight=800))
+    out.append(f"<circle cx='{cx:.0f}' cy='{cy:.0f}' r='{r}' fill='none' stroke='{color}' stroke-width='8'/>")
+    out.append(_ct(cx, cy + r + 36, ent, 28, weight=800))
     return out
 
 
@@ -208,7 +241,7 @@ def graph_card(export: dict, shot, text, base, graph) -> str:
     ents = list(by_ent.items())[:3]
     for i, (ent, fs) in enumerate(ents):
         cx = 48 + 520 * (i + 0.5) / len(ents)
-        p += _figure(cx, 300, ent, fs, r=74 if len(ents) < 3 else 62)
+        p += _figure(cx, 300, ent, fs, r=96 if len(ents) < 3 else 70)
     p.append(_ct(76, 478, "記憶なし　→　グラフ", 22, C["muted"], 700, "start"))
     base_by = {(f.claim.entity, f.claim.attr, f.claim.value): f.status for f in base}
     for j, f in enumerate(graph[:5]):
