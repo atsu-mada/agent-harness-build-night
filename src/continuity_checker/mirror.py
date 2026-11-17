@@ -67,12 +67,22 @@ _DST_KEYS = ("dst", "target", "end")
 def _pick(row: dict, keys: tuple[str, ...]):
     for k in keys:
         if k in row:
-            return row[k]
+            v = row[k]
+            # world.export() writes endpoints as {"Entity": name} / {"State": id} / {"Shot": no}
+            if isinstance(v, dict) and len(v) == 1:
+                v = next(iter(v.values()))
+            return v
     raise KeyError(f"relationship row has none of {keys}: {row}")
 
 
+def _entity(s: dict):
+    # world.export() names the owner "who"; the contract example uses "entity".
+    return s.get("entity") or s.get("who")
+
+
 def _state_id(s: dict):
-    return s.get("id") or f"{s['entity']}|{s['attr']}|{s.get('toward')}|{s['from']}"
+    sid = s.get("id")
+    return sid if sid is not None else f"{_entity(s)}|{s['attr']}|{s.get('toward')}|{s['from']}"
 
 
 def _rel_rows(rels) -> dict[str, list[dict]]:
@@ -103,7 +113,7 @@ def build_statements(export: dict) -> list[tuple[str, dict]]:
     states = [
         {
             "sid": _state_id(s),
-            "entity": s["entity"],
+            "entity": _entity(s),
             "attr": s["attr"],
             "value": s.get("value"),
             "from": s.get("from"),
