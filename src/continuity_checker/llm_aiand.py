@@ -7,17 +7,18 @@ environment variable AIAND_API_KEY, filled by `scripts/run.sh` through
 
     scripts/run.sh aiand            # self-test: one tiny call
     scripts/run.sh aiand-models     # list model ids the key can call
-Model: AIAND_MODEL or `auto` (ai& picks a model per request; the X-Model header says which).
+Model: AIAND_MODEL or `zai-org/glm-5.3-flash` (`auto` is not enabled for this organization).
 """
 from __future__ import annotations
 
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 BASE_URL = os.environ.get("AIAND_BASE_URL", "https://api.aiand.com/v1")
-MODEL = os.environ.get("AIAND_MODEL", "auto")
+MODEL = os.environ.get("AIAND_MODEL", "zai-org/glm-5.3-flash")
 SYSTEM = "あなたは映像のつながり（コンティニュイティ）の記録係。指定されたJSONだけを返す。"
 
 
@@ -30,8 +31,11 @@ def _request(path: str, body: dict | None = None, timeout: int = 60):
         data=None if body is None else json.dumps(body, ensure_ascii=False).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read()), r.headers.get("X-Model")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read()), r.headers.get("X-Model")
+    except urllib.error.HTTPError as e:  # the body says why (credit, model, schema); it holds no key
+        raise RuntimeError(f"ai& {e.code}: {e.read().decode(errors='replace')[:500]}") from None
 
 
 def ask_json(prompt: str, schema: dict, model: str | None = None, timeout: int = 60) -> dict:
