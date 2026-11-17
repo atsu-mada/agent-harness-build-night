@@ -9,8 +9,11 @@ yet are looked up with getattr, so the page still starts on develop.
 """
 from __future__ import annotations
 
+import base64
 import functools
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
 
 import gradio as gr
 
@@ -170,12 +173,10 @@ def render_check(shot, text, base, graph):
     """Text highlights and notes for both sides, plus the shot card and graph SVGs."""
     try:
         export = world.export(db()) if hasattr(world, "export") else {}
-        card = visuals.shot_card(shot, text, graph)
-        panel = visuals.graph_panel(export, shot, graph)
+        card = visuals.graph_card(export, shot, text, base, graph)
     except Exception as e:  # noqa: BLE001 - never break the check
-        card, panel = "", f"図を描けませんでした（{type(e).__name__}）"
-    return (to_highlight(text, base), notes(base), to_highlight(text, graph), notes(graph),
-            card, panel)
+        card = f"図を描けませんでした（{type(e).__name__}）"
+    return (to_highlight(text, base), notes(base), to_highlight(text, graph), notes(graph), card)
 
 
 def label(p):
@@ -188,7 +189,7 @@ def label(p):
 @on_db_thread
 def do_reset():
     DB["db"] = _reset_db()
-    return f"デモ記録に戻しました。{sync_mirror()}", [], [], "", EMPTY_CARD, EMPTY_PANEL
+    return f"デモ記録に戻しました。{sync_mirror()}", [], [], "", EMPTY_CARD
 
 
 @on_db_thread
@@ -214,8 +215,37 @@ def before_generation(shot):
 
 # ---------- page ----------
 
-EMPTY_CARD = visuals.shot_card(0, "", [])
-EMPTY_PANEL = visuals.graph_panel({}, 0, [])
+EMPTY_CARD = visuals.graph_card({}, 0, "", [], [])
+EXPORT_DIR = Path(__file__).resolve().parents[2] / "data" / "exports"
+
+
+def save_png(data_url, shot):
+    """Write the card that the browser rasterized (1920x1080 PNG) to data/exports/."""
+    if not data_url or not str(data_url).startswith("data:image/png;base64,"):
+        return gr.update(visible=False), "画像を作れませんでした（先にチェックしてください）"
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"cc-graph-S{int(shot or 0)}-{datetime.now():%Y%m%d-%H%M%S}.png"
+    out = EXPORT_DIR / name
+    out.write_bytes(base64.b64decode(str(data_url).split(",", 1)[1]))
+    return gr.update(value=str(out), visible=True), f"保存しました：data/exports/{name}（1920×1080）"
+
+
+# Rasterize the card's SVG in the browser, so the PNG matches what is on screen
+# (system Japanese fonts and emoji included) without a server-side renderer.
+SVG_TO_PNG_JS = """
+async (dataUrl, shot) => {
+  const svg = document.querySelector('#graph-card svg');
+  if (!svg) return ['', shot];
+  const xml = new XMLSerializer().serializeToString(svg);
+  const img = new Image();
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+  await img.decode();
+  const c = document.createElement('canvas');
+  c.width = 1920; c.height = 1080;
+  c.getContext('2d').drawImage(img, 0, 0, 1920, 1080);
+  return [c.toDataURL('image/png'), shot];
+}
+"""
 
 # Default design system 'codex': black on white, Open Sans, pill controls,
 # no shadows or gradients. Dark mode inverts black and white.
@@ -243,7 +273,8 @@ CSS = """
 button { border-radius: 9999px !important; font-weight: 600 !important; }
 h2 { font-weight: 800 !important; letter-spacing: -0.02em; }
 h3 { font-weight: 700 !important; }
-.visual svg { display: block; max-width: 100%; height: auto; }
+#graph-card svg { display: block; width: 100%; height: auto; border-radius: 28px; }
+#graph-card { padding: 0 !important; border: none !important; }
 """
 
 with gr.Blocks(title="Continuity Checker") as demo:
@@ -267,17 +298,11 @@ with gr.Blocks(title="Continuity Checker") as demo:
             gr.Markdown("### ハーネス（グラフの記録を参照）")
             graph_hl = gr.HighlightedText(color_map=COLORS, show_legend=True)
             graph_md = gr.Markdown()
-    with gr.Row(equal_height=False):
-        with gr.Column(scale=2):
-            gr.Markdown("### ショットの絵（グラフの判定で色分け：赤＝矛盾・緑＝OK・灰＝不明）")
-            card_html = gr.HTML(EMPTY_CARD, elem_classes="visual")
-        with gr.Column(scale=3):
-            gr.Markdown("### 判定に使ったグラフ（Entity → HAS → State → REPLACED_BY）")
-            panel_html = gr.HTML(EMPTY_PANEL, elem_classes="visual")
 
     gr.Markdown("### 変化の提案（LLM → ガード → 人が承認）")
     prop_msg = gr.Markdown()
-    check_outputs = [base_hl, base_md, graph_hl, graph_md, card_html, panel_html]
+    card_html = gr.HTML(EMPTY_CARD, render=False, elem_id="graph-card")
+    check_outputs = [base_hl, base_md, graph_hl, graph_md, card_html]
 
     @gr.render(inputs=props_state)
     def cards(props):
@@ -301,7 +326,17 @@ with gr.Blocks(title="Continuity Checker") as demo:
                 ng_btn.click(lambda ps, i=i: reject(i, ps), [props_state], [props_state, status_md])
 
     btn.click(run, [shot, text, reds_state], [*check_outputs, props_state, prop_msg, reds_state])
-    reset_btn.click(do_reset, None, [status_md, props_state, reds_state, prop_msg, card_html, panel_html])
+    reset_btn.click(do_reset, None, [status_md, props_state, reds_state, prop_msg, card_html])
+
+    gr.Markdown("---")
+    gr.Markdown("## グラフで見る（ショットの絵・記憶なしとの比較・判定に使った記録）")
+    card_html.render()
+    with gr.Row():
+        png_btn = gr.Button("画像として保存（PNG）", variant="primary", scale=1)
+        png_msg = gr.Markdown()
+    png_file = gr.File(label="保存した画像", interactive=False, visible=False)
+    png_data = gr.Textbox(visible=False)
+    png_btn.click(save_png, [png_data, shot], [png_file, png_msg], js=SVG_TO_PNG_JS)
 
     gr.Markdown("---")
     gr.Markdown("### 生成の前の欄（このショットで有効な記録＝プロンプトに渡す文脈）")

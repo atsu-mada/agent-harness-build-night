@@ -1,0 +1,4 @@
+# Codex originals and logs stay local; the app uses the 320px JPEGs one folder up.
+*.png
+*.jsonl
+*.err
